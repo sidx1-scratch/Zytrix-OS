@@ -1,0 +1,98 @@
+name: Compile Branded Custom OS
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # Allows you to manually trigger the build from GitHub UI
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Install Build Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xorriso sed curl p7zip-full
+
+    - name: Download Base Ubuntu Image
+      run: |
+        # Download clean Ubuntu 24.04 Server ISO
+        curl -L -o base.iso https://ubuntu.com
+
+    - name: Remaster and Inject Visual Identity
+      run: |
+        mkdir -p iso_source
+        7z x base.iso -oiso_source
+        
+        # 1. Structure the automated installer directories
+        mkdir -p iso_source/nocloud
+        cp user-data iso_source/nocloud/user-data
+        touch iso_source/nocloud/meta-data
+        
+        # Modify GRUB boot configurations to auto-launch autoinstall
+        sed -i 's|---|\"ds=nocloud;s=/cdrom/nocloud/\" ---|g' iso_source/boot/grub/grub.cfg
+
+        # 2. Stage visual asset directory inside ISO
+        mkdir -p iso_source/custom_branding
+        if [ -f "logo.png" ]; then
+          cp logo.png iso_source/custom_branding/logo.png
+        else
+          echo "WARNING: logo.png not found in repository root. Creating fallback."
+          echo "Please ensure logo.png is uploaded to your repository main directory."
+          touch iso_source/custom_branding/logo.png
+        fi
+
+        # 3. Create the script that applies your branding on target machine install
+        cat << 'EOF' > iso_source/custom_branding/apply_branding.sh
+        #!/bin/bash
+        # Target machine workspace deployment script
+        
+        # Ensure target system image path exists
+        mkdir -p /target/usr/share/pixmaps
+        mkdir -p /target/usr/share/plymouth/themes/spinner
+        mkdir -p /target/etc/dconf/db/gdm.d
+        
+        # Copy user custom branding logo to system directories
+        cp /cdrom/custom_branding/logo.png /target/usr/share/pixmaps/custom_logo.png
+        
+        # Inject GDM Login Display Screen Logo Configuration
+        cat << 'GDM' > /target/etc/dconf/db/gdm.d/01-logo
+        [org/gnome/login-screen]
+        logo='/usr/share/pixmaps/custom_logo.png'
+        EOF
+        
+        # Update Plymouth Boot Theme Logo (Override system default watermark)
+        cp /cdrom/custom_branding/logo.png /target/usr/share/plymouth/themes/spinner/watermark.png
+        
+        # Ensure system initramfs registers the logo updates
+        chroot /target update-initramfs -u
+        chroot /target dconf update
+        EOF
+
+        # Append late-commands step to user-data to trigger visual installation
+        chmod +x iso_source/custom_branding/apply_branding.sh
+        echo "    - bash /cdrom/custom_branding/apply_branding.sh" >> iso_source/nocloud/user-data
+
+    - name: Compile Final ISO File
+      run: |
+        mkdir -p build
+        xorriso -as mkisofs -r \
+          -V "Custom_Branded_OS" \
+          -o build/my-custom-os.iso \
+          -J -joliet-long -l \
+          -b boot/grub/i386-pc/eltorito.img \
+          -c boot.catalog \
+          -no-emul-boot -boot-load-size 4 -boot-info-table \
+          -eltorito-alt-boot \
+          -e boot/grub/efi.img \
+          -no-emul-boot \
+          iso_source
+
+    - name: Upload Bootable Image
+      uses: actions/upload-artifact@v4
+      with:
+        name: branded-linux-iso
+        path: build/my-custom-os.iso
