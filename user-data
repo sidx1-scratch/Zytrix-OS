@@ -1,0 +1,40 @@
+#cloud-config
+autoinstall:
+  version: 1
+  identity:
+    hostname: Zytrix-OS
+    username: dev
+    password: '$6$TiDVed4nPFpYmA21$lYWjadZrCr26QkPS1y5L0lSNeTkKJ4EvAjpcKiuSQngxfgnI8grwQB1xImRtroUko2JeTeu2wMWBSM0mnC4UI.'
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  # Installs standard desktop environments and direct APT applications
+  packages:
+    - ubuntu-desktop     # Installs standard GDM and desktop shell
+    - flatpak            # Installs flatpak ecosystem natively
+    - neovim             # Native nvim text editor
+    - curl
+    - git
+  early-commands:
+    - echo "Preparing system workspace"
+  late-commands:
+    # 1. Setup Warp Terminal Repository and install
+    - cur_env="DEBIAN_FRONTEND=noninteractive"
+    - sudo wget -qO- https://releases.warp.dev/linux/keys/warp.asc | gpg --dearmor > /etc/apt/keyrings/warpdotdev.gpg
+    - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/warpdotdev.gpg] https://releases.warp.dev/linux/deb stable main" > /etc/apt/sources.list.d/warpdotdev.list
+    
+    # 2. Setup VS Code Repository
+    - wget -qO- https://microsoft.com | gpg --dearmor > /etc/apt/keyrings/packages.microsoft.gpg
+    - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://microsoft.com stable main" > /etc/apt/sources.list.d/vscode.list
+    
+    # Update and pull remaining software natively
+    - apt-get update
+    - apt-get install -y warp-terminal code
+
+    # 3. Handle Remaining Apps via Snap or Flatpak for stability
+    - snap install rpi-imager
+    - snap install arduino
+    - flatpak remote-add --if-not-exists flathub https://flathub.org
+    - flatpak install -y flathub org.gnome.World.GdmSettings      # GDM Settings
+    - flatpak install -y flathub org.kde.neochat                 # NeoChat
+    - flatpak install -y flathub com.easyeda.EasyEDA              # EasyEDA
