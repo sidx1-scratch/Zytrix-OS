@@ -23,8 +23,8 @@ jobs:
 
     - name: Download Base Ubuntu Image
       run: |
-        # Pull down fixed LTS point-release from the official repository mirror
-        # Using -f prevents bad HTML data injection if the server drops
+        # Download the active Ubuntu 24.04.4 Server ISO image
+        # Using -f forces curl to stop immediately if it hits a 404 error instead of writing bad data
         curl -f -L -A "Mozilla/5.0" -o base.iso https://ubuntu.com || \
         curl -f -L -A "Mozilla/5.0" -o base.iso https://ubuntu.com
 
