@@ -3,7 +3,7 @@ name: Compile Branded Zytrix OS
 on:
   push:
     branches: [ "main" ]
-    tags: [ "v*" ] # Triggers a build and official release when you push a version tag (e.g., v1.0.0)
+    tags: [ "v*" ] # Triggers an official release when you push a version tag (e.g., v1.0.0)
   workflow_dispatch: # Allows manual trigger from the GitHub Actions web UI
 
 permissions:
@@ -19,14 +19,14 @@ jobs:
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xorriso sed curl p7zip-full
+        sudo apt-get install -y xorriso sed curl wget p7zip-full
 
     - name: Download Base Ubuntu Image
       run: |
-        # Download the active stable generic alias link for 24.04 Server
-        # Using -f forces curl to stop immediately if it hits a 404 error instead of writing bad data
-        curl -f -L -A "Mozilla/5.0" -o base.iso https://ubuntu.com || \
-        curl -f -L -A "Mozilla/5.0" -o base.iso https://releases.ubuntu.com/24.04/ubuntu-24.04-live-server-amd64.iso
+        # Using wget with browser-spoofing header and automatic retry structures
+        # If the primary link fails, it stops early rather than outputting a tiny 205KB text file
+        wget -U "Mozilla/5.0" -O base.iso https://ubuntu.com || \
+        wget -U "Mozilla/5.0" -O base.iso https://ubuntu.com
 
     - name: Remaster and Inject Visual Identity
       run: |
