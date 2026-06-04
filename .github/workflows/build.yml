@@ -23,8 +23,9 @@ jobs:
 
     - name: Download Base Ubuntu Image
       run: |
-        # Using wget with browser-spoofing header and automatic retry structures
-        # If the primary link fails, it stops early rather than outputting a tiny 205KB text file
+        # Download explicit stable LTS point-releases from the permanent Canonical archive architecture
+        # Wget will error out early instead of saving HTML web text if the image file isn't found
+        wget --spider -U "Mozilla/5.0" https://ubuntu.com && \
         wget -U "Mozilla/5.0" -O base.iso https://ubuntu.com || \
         wget -U "Mozilla/5.0" -O base.iso https://ubuntu.com
 
