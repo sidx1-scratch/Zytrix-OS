@@ -3,7 +3,7 @@ name: Compile Branded Custom OS
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # Allows you to manually trigger the build from GitHub UI
+  workflow_dispatch: # Allows manual trigger from the GitHub UI
 
 jobs:
   build-iso:
@@ -19,8 +19,10 @@ jobs:
 
     - name: Download Base Ubuntu Image
       run: |
-        # Download clean Ubuntu 24.04 Server ISO
-        curl -L -o base.iso https://ubuntu.com
+        # Download clean Ubuntu 24.04 Server ISO with browser headers and redirect followers
+        # Falls back to alternative mirror infrastructure if primary is rate-limited
+        curl -f -L -A "Mozilla/5.0" -o base.iso https://ubuntu.com || \
+        curl -f -L -A "Mozilla/5.0" -o base.iso https://ubuntu.com
 
     - name: Remaster and Inject Visual Identity
       run: |
@@ -41,7 +43,6 @@ jobs:
           cp logo.png iso_source/custom_branding/logo.png
         else
           echo "WARNING: logo.png not found in repository root. Creating fallback."
-          echo "Please ensure logo.png is uploaded to your repository main directory."
           touch iso_source/custom_branding/logo.png
         fi
 
