@@ -1,9 +1,13 @@
-name: Compile Branded Custom OS
+name: Compile Branded Zytrix OS
 
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # Allows manual trigger from the GitHub UI
+    tags: [ "v*" ] # Triggers a build and official release when you push a version tag (e.g., v1.0.0)
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions web UI
+
+permissions:
+  contents: write # Grants permissions to create GitHub Releases and upload the ISO
 
 jobs:
   build-iso:
@@ -19,8 +23,8 @@ jobs:
 
     - name: Download Base Ubuntu Image
       run: |
-        # Download clean Ubuntu 24.04 Server ISO with browser headers and redirect followers
-        # Falls back to alternative mirror infrastructure if primary is rate-limited
+        # Pull down fixed LTS point-release from the official repository mirror
+        # Using -f prevents bad HTML data injection if the server drops
         curl -f -L -A "Mozilla/5.0" -o base.iso https://ubuntu.com || \
         curl -f -L -A "Mozilla/5.0" -o base.iso https://ubuntu.com
 
@@ -34,7 +38,8 @@ jobs:
         cp user-data iso_source/nocloud/user-data
         touch iso_source/nocloud/meta-data
         
-        # Modify GRUB boot configurations to auto-launch autoinstall
+        # Modify default ISO bootloader menu labels to read Zytrix OS
+        sed -i 's/Ubuntu/Zytrix OS/g' iso_source/boot/grub/grub.cfg
         sed -i 's|---|\"ds=nocloud;s=/cdrom/nocloud/\" ---|g' iso_source/boot/grub/grub.cfg
 
         # 2. Stage visual asset directory inside ISO
@@ -55,6 +60,7 @@ jobs:
         mkdir -p /target/usr/share/pixmaps
         mkdir -p /target/usr/share/plymouth/themes/spinner
         mkdir -p /target/etc/dconf/db/gdm.d
+        mkdir -p /target/boot/grub/themes/zytrix
         
         # Copy user custom branding logo to system directories
         cp /cdrom/custom_branding/logo.png /target/usr/share/pixmaps/custom_logo.png
@@ -68,8 +74,38 @@ jobs:
         # Update Plymouth Boot Theme Logo (Override system default watermark)
         cp /cdrom/custom_branding/logo.png /target/usr/share/plymouth/themes/spinner/watermark.png
         
-        # Ensure system initramfs registers the logo updates
+        # ---- ORANGE GRUB BOOT MENU STYLE GENERATION ----
+        # Dynamically script an integrated theme mapping orange UI accents
+        cat << 'GRUBTHEME' > /target/boot/grub/themes/zytrix/theme.txt
+        title-text: "Zytrix OS Boot Manager"
+        title-color: "#FF6600"
+        desktop-color: "#0B0B0B"
+        terminal-box: "theme/terminal_box_*.png"
+        + boot_menu {
+          left = 15%
+          top = 20%
+          width = 70%
+          height = 60%
+          item_font = "Ubuntu Regular 12"
+          item_color = "#AAAAAA"
+          selected_item_color = "#FFFFFF"
+          selected_item_bg_color = "#FF6600"
+        }
+        + label {
+          top = 85%
+          left = 15%
+          text = "Use Arrow Keys to navigate options. Press Enter to boot."
+          color = "#777777"
+        }
+        GRUBTHEME
+
+        # Bind custom style directly to global environment default profiles
+        echo "GRUB_THEME=\"/boot/grub/themes/zytrix/theme.txt\"" >> /target/etc/default/grub
+        echo "GRUB_DISTRIBUTOR=\"Zytrix OS\"" >> /target/etc/default/grub
+        
+        # Ensure system initramfs and boot records register all visual configuration updates
         chroot /target update-initramfs -u
+        chroot /target update-grub
         chroot /target dconf update
         EOF
 
@@ -81,8 +117,8 @@ jobs:
       run: |
         mkdir -p build
         xorriso -as mkisofs -r \
-          -V "Custom_Branded_OS" \
-          -o build/my-custom-os.iso \
+          -V "Zytrix_OS" \
+          -o build/zytrix-os.iso \
           -J -joliet-long -l \
           -b boot/grub/i386-pc/eltorito.img \
           -c boot.catalog \
@@ -92,8 +128,25 @@ jobs:
           -no-emul-boot \
           iso_source
 
-    - name: Upload Bootable Image
+    - name: Upload Bootable Image as Actions Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: branded-linux-iso
-        path: build/my-custom-os.iso
+        name: Zytrix-OS-Installer
+        path: build/zytrix-os.iso
+
+    - name: Publish Production Zytrix OS Release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/v')
+      with:
+        files: build/zytrix-os.iso
+        name: Zytrix OS Release ${{ github.ref_name }}
+        body: |
+          Automated compilation build for Zytrix OS.
+          
+          ### Preinstalled Desktop App Environment:
+          * VS Code & Neovim Editors
+          * GDM Settings Manager & NeoChat Client
+          * EasyEDA Suite & Arduino IDE
+          * Raspberry Pi Imager
+        draft: false
+        prerelease: false
