@@ -23,25 +23,21 @@ jobs:
 
     - name: Download Base Ubuntu Image
       run: |
-        # Download explicit stable LTS point-releases from the permanent Canonical archive architecture
-        # Wget will error out early instead of saving HTML web text if the image file isn't found
-        wget --spider -U "Mozilla/5.0" https://ubuntu.com && \
-        wget -U "Mozilla/5.0" -O base.iso https://ubuntu.com || \
-        wget -U "Mozilla/5.0" -O base.iso https://ubuntu.com
+        wget -O base.iso https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso
 
     - name: Remaster and Inject Visual Identity
       run: |
         mkdir -p iso_source
         7z x base.iso -oiso_source
-        
+
         # 1. Structure the automated installer directories
         mkdir -p iso_source/nocloud
         cp user-data iso_source/nocloud/user-data
         touch iso_source/nocloud/meta-data
-        
+
         # Modify default ISO bootloader menu labels to read Zytrix OS
         sed -i 's/Ubuntu/Zytrix OS/g' iso_source/boot/grub/grub.cfg
-        sed -i 's|---|\"ds=nocloud;s=/cdrom/nocloud/\" ---|g' iso_source/boot/grub/grub.cfg
+        sed -i 's|---|"ds=nocloud;s=/cdrom/nocloud/" ---|g' iso_source/boot/grub/grub.cfg
 
         # 2. Stage visual asset directory inside ISO
         mkdir -p iso_source/custom_branding
@@ -56,25 +52,25 @@ jobs:
         cat << 'EOF' > iso_source/custom_branding/apply_branding.sh
         #!/bin/bash
         # Target machine workspace deployment script
-        
+
         # Ensure target system image path exists
         mkdir -p /target/usr/share/pixmaps
         mkdir -p /target/usr/share/plymouth/themes/spinner
         mkdir -p /target/etc/dconf/db/gdm.d
         mkdir -p /target/boot/grub/themes/zytrix
-        
+
         # Copy user custom branding logo to system directories
         cp /cdrom/custom_branding/logo.png /target/usr/share/pixmaps/custom_logo.png
-        
+
         # Inject GDM Login Display Screen Logo Configuration
         cat << 'GDM' > /target/etc/dconf/db/gdm.d/01-logo
         [org/gnome/login-screen]
         logo='/usr/share/pixmaps/custom_logo.png'
-        EOF
-        
+        GDM
+
         # Update Plymouth Boot Theme Logo (Override system default watermark)
         cp /cdrom/custom_branding/logo.png /target/usr/share/plymouth/themes/spinner/watermark.png
-        
+
         # ---- ORANGE GRUB BOOT MENU STYLE GENERATION ----
         # Dynamically script an integrated theme mapping orange UI accents
         cat << 'GRUBTHEME' > /target/boot/grub/themes/zytrix/theme.txt
@@ -103,7 +99,7 @@ jobs:
         # Bind custom style directly to global environment default profiles
         echo "GRUB_THEME=\"/boot/grub/themes/zytrix/theme.txt\"" >> /target/etc/default/grub
         echo "GRUB_DISTRIBUTOR=\"Zytrix OS\"" >> /target/etc/default/grub
-        
+
         # Ensure system initramfs and boot records register all visual configuration updates
         chroot /target update-initramfs -u
         chroot /target update-grub
@@ -143,7 +139,7 @@ jobs:
         name: Zytrix OS Release ${{ github.ref_name }}
         body: |
           Automated compilation build for Zytrix OS.
-          
+
           ### Preinstalled Desktop App Environment:
           * VS Code & Neovim Editors
           * GDM Settings Manager & NeoChat Client
