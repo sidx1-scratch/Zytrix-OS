@@ -23,10 +23,10 @@ jobs:
 
     - name: Download Base Ubuntu Image
       run: |
-        # Download the active Ubuntu 24.04.4 Server ISO image
+        # Download the active stable generic alias link for 24.04 Server
         # Using -f forces curl to stop immediately if it hits a 404 error instead of writing bad data
         curl -f -L -A "Mozilla/5.0" -o base.iso https://ubuntu.com || \
-        curl -f -L -A "Mozilla/5.0" -o base.iso https://ubuntu.com
+        curl -f -L -A "Mozilla/5.0" -o base.iso https://releases.ubuntu.com/24.04/ubuntu-24.04-live-server-amd64.iso
 
     - name: Remaster and Inject Visual Identity
       run: |
