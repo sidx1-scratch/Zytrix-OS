@@ -24,13 +24,13 @@ jobs:
           xorriso \
           squashfs-tools \
           rsync \
-          curl \
           wget \
+          curl \
           p7zip-full \
           grub-pc-bin \
           grub-efi-amd64-bin
 
-    - name: Download Base Ubuntu Image
+    - name: Download Base Ubuntu ISO
       run: |
         wget -O base.iso https://releases.ubuntu.com/24.04/ubuntu-24.04-live-server-amd64.iso
 
@@ -41,42 +41,59 @@ jobs:
         rsync -a mnt/ iso_source/
         sudo umount mnt
 
-    - name: Inject NoCloud Config + Branding
+    - name: Inject Branding + NoCloud Config
       run: |
         mkdir -p iso_source/nocloud
         cp user-data iso_source/nocloud/user-data || true
         touch iso_source/nocloud/meta-data
 
-        # Fix boot menu branding safely
-        sed -i 's/Ubuntu/Zytrix OS/g' iso_source/boot/grub/grub.cfg || true
+        # -----------------------------
+        # SAFE GRUB PATCHING (FIXED)
+        # -----------------------------
+        if [ -f "iso_source/boot/grub/grub.cfg" ]; then
+          sed -i 's/Ubuntu/Zytrix OS/g' iso_source/boot/grub/grub.cfg
+        fi
 
-        # Branding assets
+        if [ -f "iso_source/EFI/BOOT/grub.cfg" ]; then
+          sed -i 's/Ubuntu/Zytrix OS/g' iso_source/EFI/BOOT/grub.cfg
+        fi
+
+        # Branding folder
         mkdir -p iso_source/custom_branding
 
         if [ -f "logo.png" ]; then
           cp logo.png iso_source/custom_branding/logo.png
         else
-          echo "WARNING: logo.png missing"
+          echo "WARNING: logo.png not found"
         fi
 
-        # Apply branding script (target system side)
+        # Branding script executed inside installer target system
         cat << 'EOF' > iso_source/custom_branding/apply_branding.sh
 #!/bin/bash
+
+set -e
 
 mkdir -p /target/usr/share/pixmaps
 mkdir -p /target/usr/share/plymouth/themes/zytrix
 mkdir -p /target/etc/dconf/db/gdm.d
 mkdir -p /target/boot/grub/themes/zytrix
 
-cp /cdrom/custom_branding/logo.png /target/usr/share/pixmaps/custom_logo.png
+# Copy logo safely (no /cdrom dependency assumption)
+if [ -f /cdrom/custom_branding/logo.png ]; then
+  cp /cdrom/custom_branding/logo.png /target/usr/share/pixmaps/custom_logo.png
+fi
 
+# GDM logo
 cat << 'GDM' > /target/etc/dconf/db/gdm.d/01-logo
 [org/gnome/login-screen]
 logo='/usr/share/pixmaps/custom_logo.png'
 GDM
 
-cp /cdrom/custom_branding/logo.png /target/usr/share/plymouth/themes/zytrix/watermark.png
+# Plymouth branding
+cp /target/usr/share/pixmaps/custom_logo.png \
+  /target/usr/share/plymouth/themes/zytrix/watermark.png || true
 
+# GRUB theme
 cat << 'GRUB' > /target/boot/grub/themes/zytrix/theme.txt
 title-text: "Zytrix OS Boot Manager"
 title-color: "#FF6600"
@@ -95,14 +112,21 @@ desktop-color: "#0B0B0B"
 + label {
   top = 85%
   left = 15%
-  text = "Use arrows to navigate"
+  text = "Use arrow keys to navigate"
   color = "#777777"
 }
 GRUB
 
-echo 'GRUB_THEME="/boot/grub/themes/zytrix/theme.txt"' >> /target/etc/default/grub
-sed -i 's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="Zytrix OS"/' /target/etc/default/grub || true
+# GRUB config safely patched
+if grep -q "^GRUB_DISTRIBUTOR" /target/etc/default/grub; then
+  sed -i 's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="Zytrix OS"/' /target/etc/default/grub
+else
+  echo 'GRUB_DISTRIBUTOR="Zytrix OS"' >> /target/etc/default/grub
+fi
 
+echo 'GRUB_THEME="/boot/grub/themes/zytrix/theme.txt"' >> /target/etc/default/grub
+
+# Safe system updates (non-fatal)
 chroot /target update-initramfs -u || true
 chroot /target update-grub || true
 chroot /target dconf update || true
@@ -110,7 +134,7 @@ EOF
 
         chmod +x iso_source/custom_branding/apply_branding.sh
 
-    - name: Fix Cloud-init Autoinstall Hook
+    - name: Fix Cloud-init Autoinstall Hook (Correct YAML)
       run: |
         cat << 'EOF' >> iso_source/nocloud/user-data
 
@@ -118,7 +142,7 @@ late-commands:
   - curtin in-target -- bash /cdrom/custom_branding/apply_branding.sh
 EOF
 
-    - name: Build ISO (UEFI + BIOS)
+    - name: Build Bootable ISO (UEFI + BIOS)
       run: |
         mkdir -p build
 
@@ -142,19 +166,18 @@ EOF
         name: Zytrix-OS
         path: build/zytrix-os.iso
 
-    - name: Release ISO
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/v')
       with:
         files: build/zytrix-os.iso
         name: Zytrix OS ${{ github.ref_name }}
         body: |
-          Automated Zytrix OS build
+          Zytrix OS automated build
 
-          Includes:
-          - Custom branding
-          - NoCloud autoinstall
-          - GRUB + Plymouth customization
-          - GNOME login screen logo
+          Features:
+          - Custom branding (GRUB + Plymouth + GDM)
+          - Cloud-init autoinstall support
+          - Ubuntu 24.04 base
         draft: false
         prerelease: false
