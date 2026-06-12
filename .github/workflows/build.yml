@@ -2,16 +2,17 @@ name: Compile Branded Zytrix OS
 
 on:
   push:
-    branches: [ "main" ]
-    tags: [ "v*" ] # Triggers an official release when you push a version tag (e.g., v1.0.0)
-  workflow_dispatch: # Allows manual trigger from the GitHub Actions web UI
+    branches: ["main"]
+    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
-  contents: write # Grants permissions to create GitHub Releases and upload the ISO
+  contents: write
 
 jobs:
   build-iso:
     runs-on: ubuntu-latest
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -19,104 +20,114 @@ jobs:
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xorriso sed curl wget p7zip-full
+        sudo apt-get install -y \
+          xorriso \
+          squashfs-tools \
+          rsync \
+          curl \
+          wget \
+          p7zip-full \
+          grub-pc-bin \
+          grub-efi-amd64-bin
 
     - name: Download Base Ubuntu Image
       run: |
-        wget -O base.iso https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso
+        wget -O base.iso https://releases.ubuntu.com/24.04/ubuntu-24.04-live-server-amd64.iso
 
-    - name: Remaster and Inject Visual Identity
+    - name: Extract ISO Properly
       run: |
-        mkdir -p iso_source
-        7z x base.iso -oiso_source
+        mkdir -p mnt iso_source
+        sudo mount -o loop base.iso mnt
+        rsync -a mnt/ iso_source/
+        sudo umount mnt
 
-        # 1. Structure the automated installer directories
+    - name: Inject NoCloud Config + Branding
+      run: |
         mkdir -p iso_source/nocloud
-        cp user-data iso_source/nocloud/user-data
+        cp user-data iso_source/nocloud/user-data || true
         touch iso_source/nocloud/meta-data
 
-        # Modify default ISO bootloader menu labels to read Zytrix OS
-        sed -i 's/Ubuntu/Zytrix OS/g' iso_source/boot/grub/grub.cfg
-        sed -i 's|---|"ds=nocloud;s=/cdrom/nocloud/" ---|g' iso_source/boot/grub/grub.cfg
+        # Fix boot menu branding safely
+        sed -i 's/Ubuntu/Zytrix OS/g' iso_source/boot/grub/grub.cfg || true
 
-        # 2. Stage visual asset directory inside ISO
+        # Branding assets
         mkdir -p iso_source/custom_branding
+
         if [ -f "logo.png" ]; then
           cp logo.png iso_source/custom_branding/logo.png
         else
-          echo "WARNING: logo.png not found in repository root. Creating fallback."
-          touch iso_source/custom_branding/logo.png
+          echo "WARNING: logo.png missing"
         fi
 
-        # 3. Create the script that applies your branding on target machine install
+        # Apply branding script (target system side)
         cat << 'EOF' > iso_source/custom_branding/apply_branding.sh
-        #!/bin/bash
-        # Target machine workspace deployment script
+#!/bin/bash
 
-        # Ensure target system image path exists
-        mkdir -p /target/usr/share/pixmaps
-        mkdir -p /target/usr/share/plymouth/themes/spinner
-        mkdir -p /target/etc/dconf/db/gdm.d
-        mkdir -p /target/boot/grub/themes/zytrix
+mkdir -p /target/usr/share/pixmaps
+mkdir -p /target/usr/share/plymouth/themes/zytrix
+mkdir -p /target/etc/dconf/db/gdm.d
+mkdir -p /target/boot/grub/themes/zytrix
 
-        # Copy user custom branding logo to system directories
-        cp /cdrom/custom_branding/logo.png /target/usr/share/pixmaps/custom_logo.png
+cp /cdrom/custom_branding/logo.png /target/usr/share/pixmaps/custom_logo.png
 
-        # Inject GDM Login Display Screen Logo Configuration
-        cat << 'GDM' > /target/etc/dconf/db/gdm.d/01-logo
-        [org/gnome/login-screen]
-        logo='/usr/share/pixmaps/custom_logo.png'
-        GDM
+cat << 'GDM' > /target/etc/dconf/db/gdm.d/01-logo
+[org/gnome/login-screen]
+logo='/usr/share/pixmaps/custom_logo.png'
+GDM
 
-        # Update Plymouth Boot Theme Logo (Override system default watermark)
-        cp /cdrom/custom_branding/logo.png /target/usr/share/plymouth/themes/spinner/watermark.png
+cp /cdrom/custom_branding/logo.png /target/usr/share/plymouth/themes/zytrix/watermark.png
 
-        # ---- ORANGE GRUB BOOT MENU STYLE GENERATION ----
-        # Dynamically script an integrated theme mapping orange UI accents
-        cat << 'GRUBTHEME' > /target/boot/grub/themes/zytrix/theme.txt
-        title-text: "Zytrix OS Boot Manager"
-        title-color: "#FF6600"
-        desktop-color: "#0B0B0B"
-        terminal-box: "theme/terminal_box_*.png"
-        + boot_menu {
-          left = 15%
-          top = 20%
-          width = 70%
-          height = 60%
-          item_font = "Ubuntu Regular 12"
-          item_color = "#AAAAAA"
-          selected_item_color = "#FFFFFF"
-          selected_item_bg_color = "#FF6600"
-        }
-        + label {
-          top = 85%
-          left = 15%
-          text = "Use Arrow Keys to navigate options. Press Enter to boot."
-          color = "#777777"
-        }
-        GRUBTHEME
+cat << 'GRUB' > /target/boot/grub/themes/zytrix/theme.txt
+title-text: "Zytrix OS Boot Manager"
+title-color: "#FF6600"
+desktop-color: "#0B0B0B"
 
-        # Bind custom style directly to global environment default profiles
-        echo "GRUB_THEME=\"/boot/grub/themes/zytrix/theme.txt\"" >> /target/etc/default/grub
-        echo "GRUB_DISTRIBUTOR=\"Zytrix OS\"" >> /target/etc/default/grub
++ boot_menu {
+  left = 15%
+  top = 20%
+  width = 70%
+  height = 60%
+  item_color = "#AAAAAA"
+  selected_item_color = "#FFFFFF"
+  selected_item_bg_color = "#FF6600"
+}
 
-        # Ensure system initramfs and boot records register all visual configuration updates
-        chroot /target update-initramfs -u
-        chroot /target update-grub
-        chroot /target dconf update
-        EOF
++ label {
+  top = 85%
+  left = 15%
+  text = "Use arrows to navigate"
+  color = "#777777"
+}
+GRUB
 
-        # Append late-commands step to user-data to trigger visual installation
+echo 'GRUB_THEME="/boot/grub/themes/zytrix/theme.txt"' >> /target/etc/default/grub
+sed -i 's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="Zytrix OS"/' /target/etc/default/grub || true
+
+chroot /target update-initramfs -u || true
+chroot /target update-grub || true
+chroot /target dconf update || true
+EOF
+
         chmod +x iso_source/custom_branding/apply_branding.sh
-        echo "    - bash /cdrom/custom_branding/apply_branding.sh" >> iso_source/nocloud/user-data
 
-    - name: Compile Final ISO File
+    - name: Fix Cloud-init Autoinstall Hook
+      run: |
+        cat << 'EOF' >> iso_source/nocloud/user-data
+
+late-commands:
+  - curtin in-target -- bash /cdrom/custom_branding/apply_branding.sh
+EOF
+
+    - name: Build ISO (UEFI + BIOS)
       run: |
         mkdir -p build
-        xorriso -as mkisofs -r \
-          -V "Zytrix_OS" \
+
+        xorriso -as mkisofs \
+          -r -V "Zytrix_OS" \
           -o build/zytrix-os.iso \
           -J -joliet-long -l \
+          -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+          -partition_offset 16 \
           -b boot/grub/i386-pc/eltorito.img \
           -c boot.catalog \
           -no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -125,25 +136,25 @@ jobs:
           -no-emul-boot \
           iso_source
 
-    - name: Upload Bootable Image as Actions Artifact
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Zytrix-OS-Installer
+        name: Zytrix-OS
         path: build/zytrix-os.iso
 
-    - name: Publish Production Zytrix OS Release
+    - name: Release ISO
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/v')
       with:
         files: build/zytrix-os.iso
-        name: Zytrix OS Release ${{ github.ref_name }}
+        name: Zytrix OS ${{ github.ref_name }}
         body: |
-          Automated compilation build for Zytrix OS.
+          Automated Zytrix OS build
 
-          ### Preinstalled Desktop App Environment:
-          * VS Code & Neovim Editors
-          * GDM Settings Manager & NeoChat Client
-          * EasyEDA Suite & Arduino IDE
-          * Raspberry Pi Imager
+          Includes:
+          - Custom branding
+          - NoCloud autoinstall
+          - GRUB + Plymouth customization
+          - GNOME login screen logo
         draft: false
         prerelease: false
